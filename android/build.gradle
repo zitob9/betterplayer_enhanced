@@ -8,7 +8,7 @@ buildscript {
         annotationVersion = "1.7.1"
         workVersion = "2.9.0"
         coreVersion = "1.12.0"
-        kotlinVersion = "2.1.0"
+        kotlinVersion = "2.2.20"
     }
 
     repositories {
