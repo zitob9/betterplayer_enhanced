@@ -34,7 +34,7 @@ apply plugin: 'kotlin-android'
 
 android {
     namespace 'com.sarthak.better_player_enhanced'
-    compileSdkVersion 34
+    compileSdkVersion 36
     
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
