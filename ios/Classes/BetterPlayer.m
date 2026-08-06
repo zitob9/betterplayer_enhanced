@@ -42,6 +42,31 @@ AVPictureInPictureController *_pipController;
     return playerView;
 }
 
+- (BOOL)sendEvent:(id)event {
+    FlutterEventSink sink = _eventSink;
+    if (_disposed || sink == nil) {
+        return NO;
+    }
+
+    @try {
+        sink(event);
+        return YES;
+    }
+    @catch (NSException *exception) {
+        // Flutter can tear down the binary messenger between a native AVPlayer
+        // callback and event delivery. Once that happens, invalidate the stale
+        // sink so later KVO/PiP callbacks become harmless no-ops.
+        // The assertion text was verified against Flutter 3.44.8; re-check
+        // this filter when upgrading the Flutter engine.
+        if ([exception.name isEqualToString:NSInternalInconsistencyException] &&
+            [exception.reason containsString:@"FlutterEngine"]) {
+            _eventSink = nil;
+            return NO;
+        }
+        @throw exception;
+    }
+}
+
 - (void)addObservers:(AVPlayerItem*)item {
     if (!self._observersAdded){
         [_player addObserver:self forKeyPath:@"rate" options:0 context:nil];
@@ -114,10 +139,8 @@ AVPictureInPictureController *_pipController;
         AVPlayerItem* p = [notification object];
         [p seekToTime:kCMTimeZero completionHandler:nil];
     } else {
-        if (_eventSink) {
-            _eventSink(@{@"event" : @"completed", @"key" : _key});
+        if ([self sendEvent:@{@"event" : @"completed", @"key" : _key}]) {
             [ self removeObservers];
-
         }
     }
 }
@@ -286,12 +309,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     } else {
         _stalledCount++;
         if (_stalledCount > 60){
-            if (_eventSink != nil) {
-                _eventSink([FlutterError
-                        errorWithCode:@"VideoError"
-                        message:@"Failed to load video: playback stalled"
-                        details:nil]);
-            }
+            [self sendEvent:[FlutterError
+                    errorWithCode:@"VideoError"
+                    message:@"Failed to load video: playback stalled"
+                    details:nil]];
             return;
         }
         [self performSelector:@selector(startStalledCheck) withObject:nil afterDelay:1];
@@ -319,6 +340,10 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                         change:(NSDictionary*)change
                        context:(void*)context {
 
+    if (_disposed) {
+        return;
+    }
+
     if ([path isEqualToString:@"rate"]) {
         if (@available(iOS 10.0, *)) {
             if (_pipController.pictureInPictureActive == true){
@@ -328,17 +353,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPaused){
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
-                    if (_eventSink != nil) {
-                      _eventSink(@{@"event" : @"pause"});
-                    }
+                    [self sendEvent:@{@"event" : @"pause"}];
                     return;
 
                 }
                 if (_player.timeControlStatus == AVPlayerTimeControlStatusPlaying){
                     _lastAvPlayerTimeControlStatus = _player.timeControlStatus;
-                    if (_eventSink != nil) {
-                      _eventSink(@{@"event" : @"play"});
-                    }
+                    [self sendEvent:@{@"event" : @"play"}];
                 }
             }
         }
@@ -367,7 +388,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
                 [values addObject:@[ @(start), @(end) ]];
             }
-            _eventSink(@{@"event" : @"bufferingUpdate", @"values" : values, @"key" : _key});
+            [self sendEvent:@{@"event" : @"bufferingUpdate", @"values" : values, @"key" : _key}];
         }
     }
     else if (context == presentationSizeContext){
@@ -381,13 +402,11 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
                 NSLog(@"Failed to load video:");
                 NSLog(item.error.debugDescription);
 
-                if (_eventSink != nil) {
-                    _eventSink([FlutterError
+                [self sendEvent:[FlutterError
                                 errorWithCode:@"VideoError"
                                 message:[@"Failed to load video: "
                                          stringByAppendingString:[item.error localizedDescription]]
-                                details:nil]);
-                }
+                                details:nil]];
                 break;
             case AVPlayerItemStatusUnknown:
                 break;
@@ -398,18 +417,12 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     } else if (context == playbackLikelyToKeepUpContext) {
         if ([[_player currentItem] isPlaybackLikelyToKeepUp]) {
             [self updatePlayingState];
-            if (_eventSink != nil) {
-                _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
-            }
+            [self sendEvent:@{@"event" : @"bufferingEnd", @"key" : _key}];
         }
     } else if (context == playbackBufferEmptyContext) {
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"bufferingStart", @"key" : _key});
-        }
+        [self sendEvent:@{@"event" : @"bufferingStart", @"key" : _key}];
     } else if (context == playbackBufferFullContext) {
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"bufferingEnd", @"key" : _key});
-        }
+        [self sendEvent:@{@"event" : @"bufferingEnd", @"key" : _key}];
     }
 }
 
@@ -474,13 +487,13 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 
         _isInitialized = true;
         [self updatePlayingState];
-        _eventSink(@{
+        [self sendEvent:@{
             @"event" : @"initialized",
             @"duration" : @([self duration]),
             @"width" : @(fabs(realSize.width) ? : width),
             @"height" : @(fabs(realSize.height) ? : height),
             @"key" : _key
-        });
+        }];
     }
 }
 
@@ -635,6 +648,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         [self setupPipController];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
+            if (self.disposed) {
+                return;
+            }
             [self setPictureInPicture:true];
         });
     }
@@ -646,9 +662,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     if (__playerLayer){
         [self._playerLayer removeFromSuperlayer];
         self._playerLayer = nil;
-        if (_eventSink != nil) {
-            _eventSink(@{@"event" : @"pipStop"});
-        }
+        [self sendEvent:@{@"event" : @"pipStop"}];
     }
 }
 #endif
@@ -659,9 +673,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController  API_AVAILABLE(ios(9.0)){
-    if (_eventSink != nil) {
-        _eventSink(@{@"event" : @"pipStart"});
-    }
+    [self sendEvent:@{@"event" : @"pipStart"}];
 }
 
 - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController  API_AVAILABLE(ios(9.0)){
@@ -733,21 +745,41 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 /// is useful for the case where the Engine is in the process of deconstruction
 /// so the channel is going to die or is already dead.
 - (void)disposeSansEventChannel {
+    if (_disposed) {
+        return;
+    }
+
+    // Invalidate Dart delivery and detach KVO before AVPlayer.pause changes
+    // rate synchronously. This ordering prevents teardown from emitting into a
+    // Flutter engine that has already stopped.
+    _disposed = true;
+    _eventSink = nil;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
     @try{
-        [self clear];
+        [self removeObservers];
     }
     @catch(NSException *exception) {
-        NSLog(exception.debugDescription);
+        NSLog(@"%@", exception.debugDescription);
     }
+    @try{
+        [_player pause];
+        [_player.currentItem.asset cancelLoading];
+    }
+    @catch(NSException *exception) {
+        NSLog(@"%@", exception.debugDescription);
+    }
+    _isInitialized = false;
+    _isPlaying = false;
+    _isStalledCheckStarted = false;
+    _failedCount = 0;
+    _key = nil;
 }
 
 - (void)dispose {
-    [self pause];
     [self disposeSansEventChannel];
     [_eventChannel setStreamHandler:nil];
     [self disablePictureInPicture];
     [self setPictureInPicture:false];
-    _disposed = true;
 }
 
 @end

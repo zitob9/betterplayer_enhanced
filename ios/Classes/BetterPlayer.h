@@ -58,6 +58,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (int64_t) FLTCMTimeToMillis:(CMTime) time;
 
 - (void)clear;
+- (BOOL)sendEvent:(id)event;
 - (void)disposeSansEventChannel;
 - (void)dispose;
 @end

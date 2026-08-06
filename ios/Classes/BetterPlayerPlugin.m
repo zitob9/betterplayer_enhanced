@@ -154,9 +154,9 @@ id _changePlaybackPositionCommandTarget;
             return MPRemoteCommandHandlerStatusCommandFailed;
         }
         if (notificationPlayer.isPlaying){
-            notificationPlayer.eventSink(@{@"event" : @"play"});
+            [notificationPlayer sendEvent:@{@"event" : @"play"}];
         } else {
-            notificationPlayer.eventSink(@{@"event" : @"pause"});
+            [notificationPlayer sendEvent:@{@"event" : @"pause"}];
         }
         return MPRemoteCommandHandlerStatusSuccess;
     }];
@@ -167,7 +167,7 @@ id _changePlaybackPositionCommandTarget;
         if (!notificationPlayer) {
             return MPRemoteCommandHandlerStatusCommandFailed;
         }
-        notificationPlayer.eventSink(@{@"event" : @"play"});
+        [notificationPlayer sendEvent:@{@"event" : @"play"}];
         return MPRemoteCommandHandlerStatusSuccess;
     }];
 
@@ -177,7 +177,7 @@ id _changePlaybackPositionCommandTarget;
         if (!notificationPlayer) {
             return MPRemoteCommandHandlerStatusCommandFailed;
         }
-        notificationPlayer.eventSink(@{@"event" : @"pause"});
+        [notificationPlayer sendEvent:@{@"event" : @"pause"}];
         return MPRemoteCommandHandlerStatusSuccess;
     }];
 
@@ -194,7 +194,7 @@ id _changePlaybackPositionCommandTarget;
             CMTime time = CMTimeMake(playbackEvent.positionTime, 1);
             int64_t millis = [BetterPlayerTimeUtils FLTCMTimeToMillis:(time)];
             [notificationPlayer seekTo: millis];
-            notificationPlayer.eventSink(@{@"event" : @"seek", @"position": @(millis)});
+            [notificationPlayer sendEvent:@{@"event" : @"seek", @"position": @(millis)}];
             return MPRemoteCommandHandlerStatusSuccess;
         }];
     }
