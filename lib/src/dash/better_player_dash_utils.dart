@@ -5,13 +5,22 @@ import 'package:better_player_enhanced/src/asms/better_player_asms_track.dart';
 import 'package:better_player_enhanced/src/core/better_player_utils.dart';
 import 'package:better_player_enhanced/src/hls/hls_parser/mime_types.dart';
 import 'package:xml/xml.dart';
+import 'package:flutter/foundation.dart';
 
 enum _MediaType { audio, video, text }
 
 ///DASH helper class
 class BetterPlayerDashUtils {
   static Future<BetterPlayerAsmsDataHolder> parse(
-      String data, String masterPlaylistUrl) async {
+      String data, String masterPlaylistUrl) {
+    // async alone does not move XML/entity decoding off the UI isolate.
+    // Only transfer input strings and extracted metadata, never the XML tree.
+    return compute(_parseManifest, (data, masterPlaylistUrl),
+        debugLabel: 'BetterPlayer DASH metadata');
+  }
+
+  static BetterPlayerAsmsDataHolder _parseManifest((String, String) input) {
+    final (data, masterPlaylistUrl) = input;
     List<BetterPlayerAsmsTrack> tracks = [];
     final List<BetterPlayerAsmsAudioTrack> audios = [];
     final List<BetterPlayerAsmsSubtitle> subtitles = [];

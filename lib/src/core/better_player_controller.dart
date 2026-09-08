@@ -114,6 +114,11 @@ class BetterPlayerController {
 
   ///Has player been disposed.
   bool _disposed = false;
+  int _metadataGeneration = 0;
+  Future<void>? _pendingMetadataSetup;
+
+  @visibleForTesting
+  Future<void>? get pendingMetadataSetupForTesting => _pendingMetadataSetup;
 
   ///Was player playing before automatic pause.
   bool? _wasPlayingBeforePause;
@@ -233,6 +238,7 @@ class BetterPlayerController {
 
   ///Setup new data source in Better Player.
   Future setupDataSource(BetterPlayerDataSource betterPlayerDataSource) async {
+    final metadataGeneration = ++_metadataGeneration;
     postEvent(BetterPlayerEvent(BetterPlayerEventType.setupDataSource,
         parameters: <String, dynamic>{
           _dataSourceParameter: betterPlayerDataSource,
@@ -263,8 +269,11 @@ class BetterPlayerController {
     }
 
     if (_isDataSourceAsms(betterPlayerDataSource)) {
-      _setupAsmsDataSource(betterPlayerDataSource).then((dynamic value) {
-        _setupSubtitles();
+      _pendingMetadataSetup = _setupAsmsDataSource(betterPlayerDataSource, metadataGeneration)
+          .then((dynamic value) {
+        if (!_disposed && metadataGeneration == _metadataGeneration) {
+          _setupSubtitles();
+        }
       });
     } else {
       _setupSubtitles();
@@ -272,7 +281,9 @@ class BetterPlayerController {
 
     ///Process data source
     await _setupDataSource(betterPlayerDataSource);
-    setTrack(BetterPlayerAsmsTrack.defaultTrack());
+    if (!_disposed && metadataGeneration == _metadataGeneration) {
+      setTrack(BetterPlayerAsmsTrack.defaultTrack());
+    }
   }
 
   ///Configure subtitles based on subtitles source.
@@ -299,14 +310,16 @@ class BetterPlayerController {
   ///Configure HLS / DASH data source based on provided data source and configuration.
   ///This method configures tracks, subtitles and audio tracks from given
   ///master playlist.
-  Future _setupAsmsDataSource(BetterPlayerDataSource source) async {
+  Future _setupAsmsDataSource(BetterPlayerDataSource source, int generation) async {
     final String? data = await BetterPlayerAsmsUtils.getDataFromUrl(
-      betterPlayerDataSource!.url,
+      source.url,
       _getHeaders(),
     );
+    if (_disposed || generation != _metadataGeneration) return;
     if (data != null) {
       final BetterPlayerAsmsDataHolder _response =
-          await BetterPlayerAsmsUtils.parse(data, betterPlayerDataSource!.url);
+          await BetterPlayerAsmsUtils.parse(data, source.url);
+      if (_disposed || generation != _metadataGeneration) return;
 
       /// Load tracks
       if (_betterPlayerDataSource?.useAsmsTracks == true) {
