@@ -693,7 +693,34 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
 }
 
 - (void) setAudioTrack:(NSString*) name index:(int) index{
-    AVMediaSelectionGroup *audioSelectionGroup = [[[_player currentItem] asset] mediaSelectionGroupForMediaCharacteristic: AVMediaCharacteristicAudible];
+    AVPlayerItem *currentItem = [_player currentItem];
+    AVAsset *asset = currentItem.asset;
+    if (!currentItem || !asset) {
+        return;
+    }
+    // Reading media selection groups synchronously makes a remote HLS asset
+    // load its metadata on the main thread (CASTBROWSER-7B AppHang).
+    NSString *key = @"availableMediaCharacteristicsWithMediaSelectionOptions";
+    __weak BetterPlayer *weakSelf = self;
+    __weak AVPlayerItem *weakItem = currentItem;
+    [asset loadValuesAsynchronouslyForKeys:@[key] completionHandler:^{
+        NSError *error = nil;
+        if ([asset statusOfValueForKey:key error:&error] != AVKeyValueStatusLoaded) {
+            return;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BetterPlayer *strongSelf = weakSelf;
+            AVPlayerItem *strongItem = weakItem;
+            if (!strongSelf || !strongItem || strongSelf.disposed || strongSelf.player.currentItem != strongItem) {
+                return;
+            }
+            [strongSelf selectAudioTrack:name index:index inItem:strongItem];
+        });
+    }];
+}
+
+- (void) selectAudioTrack:(NSString*) name index:(int) index inItem:(AVPlayerItem*) item {
+    AVMediaSelectionGroup *audioSelectionGroup = [[item asset] mediaSelectionGroupForMediaCharacteristic: AVMediaCharacteristicAudible];
     NSArray* options = audioSelectionGroup.options;
 
 
@@ -703,7 +730,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
         if (metaDatas.count > 0) {
             NSString *title = ((AVMetadataItem*)[metaDatas objectAtIndex:0]).stringValue;
             if ([name compare:title] == NSOrderedSame && audioTrackIndex == index ){
-                [[_player currentItem] selectMediaOption:option inMediaSelectionGroup: audioSelectionGroup];
+                [item selectMediaOption:option inMediaSelectionGroup: audioSelectionGroup];
             }
         }
 

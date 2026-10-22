@@ -185,6 +185,7 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
   int? _textureId;
 
   Timer? _timer;
+  bool _positionPollInFlight = false;
   bool _isDisposed = false;
   late Completer<void> _initializingCompleter;
   StreamSubscription<dynamic>? _eventSubscription;
@@ -510,37 +511,48 @@ class VideoPlayerController extends ValueNotifier<VideoPlayerValue> {
       _timer = Timer.periodic(
         const Duration(milliseconds: 300),
         (Timer timer) async {
-          if (!_hasPlatformPlayer || !value.isPlaying) {
-            _cancelPositionTimer(timer);
+          // A slow platform call must not stack up further polls behind it.
+          if (_positionPollInFlight) {
             return;
           }
-          final Duration? newPosition = await position;
-          if (newPosition == null) {
-            _cancelPositionTimer(timer);
-            return;
-          }
-          if (!_hasPlatformPlayer || !value.isPlaying) {
-            _cancelPositionTimer(timer);
-            return;
-          }
-          final DateTime? newAbsolutePosition = await absolutePosition;
-          // ignore: invariant_booleans
-          if (!_hasPlatformPlayer || !value.isPlaying) {
-            _cancelPositionTimer(timer);
-            return;
-          }
-          _updatePosition(newPosition, absolutePosition: newAbsolutePosition);
-          if (_seekPosition != null) {
-            final difference =
-                newPosition.inMilliseconds - _seekPosition!.inMilliseconds;
-            if (difference > 0) {
-              _seekPosition = null;
-            }
+          _positionPollInFlight = true;
+          try {
+            await _pollPosition(timer);
+          } finally {
+            _positionPollInFlight = false;
           }
         },
       );
     } else {
       await _videoPlayerPlatform.pause(_textureId);
+    }
+  }
+
+  // Only the playback position is polled. The absolute (wall-clock) position
+  // is read on demand through [absolutePosition]: on iOS it is a synchronous
+  // AVPlayerItem.currentDate call that can hang the main thread.
+  Future<void> _pollPosition(Timer timer) async {
+    if (!_hasPlatformPlayer || !value.isPlaying) {
+      _cancelPositionTimer(timer);
+      return;
+    }
+    final Duration? newPosition = await position;
+    if (newPosition == null) {
+      _cancelPositionTimer(timer);
+      return;
+    }
+    // ignore: invariant_booleans
+    if (!_hasPlatformPlayer || !value.isPlaying) {
+      _cancelPositionTimer(timer);
+      return;
+    }
+    _updatePosition(newPosition);
+    if (_seekPosition != null) {
+      final difference =
+          newPosition.inMilliseconds - _seekPosition!.inMilliseconds;
+      if (difference > 0) {
+        _seekPosition = null;
+      }
     }
   }
 
