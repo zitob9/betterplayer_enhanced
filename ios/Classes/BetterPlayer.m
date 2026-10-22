@@ -19,7 +19,10 @@ API_AVAILABLE(ios(9.0))
 AVPictureInPictureController *_pipController;
 #endif
 
-@implementation BetterPlayer
+@implementation BetterPlayer {
+    // Bumped per setAudioTrack request so a slower, older load cannot override a newer choice.
+    NSUInteger _audioTrackRequest;
+}
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super init];
     NSAssert(self, @"super init cannot be nil");
@@ -701,6 +704,7 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
     // Reading media selection groups synchronously makes a remote HLS asset
     // load its metadata on the main thread (CASTBROWSER-7B AppHang).
     NSString *key = @"availableMediaCharacteristicsWithMediaSelectionOptions";
+    NSUInteger request = ++_audioTrackRequest;
     __weak BetterPlayer *weakSelf = self;
     __weak AVPlayerItem *weakItem = currentItem;
     [asset loadValuesAsynchronouslyForKeys:@[key] completionHandler:^{
@@ -712,6 +716,9 @@ static inline CGFloat radiansToDegrees(CGFloat radians) {
             BetterPlayer *strongSelf = weakSelf;
             AVPlayerItem *strongItem = weakItem;
             if (!strongSelf || !strongItem || strongSelf.disposed || strongSelf.player.currentItem != strongItem) {
+                return;
+            }
+            if (request != strongSelf->_audioTrackRequest) {
                 return;
             }
             [strongSelf selectAudioTrack:name index:index inItem:strongItem];
